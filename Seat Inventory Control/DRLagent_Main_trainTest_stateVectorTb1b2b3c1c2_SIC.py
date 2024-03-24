@@ -1,5 +1,12 @@
-# This script is used to train and test the DRL agent with the air travel market simulator
-# Author: Syed A.M. Shihab
+# TODO: change armClasses...py name if necessary, trainingData filename (before training and before testing), testData filename, nActions, nerual network input, nHiddenNeurons, nTestEpisodes if necessary after
+# changing market parameters
+
+# TODO: change nTrEpisodes and indexSimulationRun before each new run
+
+# TODO: change the filename (modelIndex and simulationRunIndex) of the best model before loading weights onto the neural network
+# TODO: check if NN weight updated during training as per target_model_update rule? Updated NN used in dqn.test() when it is called later on?
+
+# list of hyperparameters: target_model_update, nTrEpisodes, gamma, nHiddenNeuronsEachLayer, nHiddenLayers, activation function, lr, policy
 
 
 import numpy as np
@@ -24,29 +31,30 @@ from rl.core import Processor, Env
 import matplotlib.pyplot as plt
 import os
 
-from airTravelMarketSimulator_env import *
+# from armClasses_dynamicPricing import *
+# from armClasses_observationSpaceModified1 import *
+from DRLagent_ARMclasses_3fClasses_Tb1b2b3c1c2_SIC import *
 
-
-# list of hyperparameters: target_model_update, nTrEpisodes, gamma, nHiddenNeuronsEachLayer, nHiddenLayers, activation function, lr, policy
-indexSimulationRun = 1 # change indexSimulationRun to prevent overwriting results from a previous run of this script
-
-nTrEpisodes = 25000 # it has to be some multiple of checkPointInterval
-nb_eps_steps = 182
-nb_steps = nb_eps_steps*nTrEpisodes  
-logging_interval = nb_steps/10 
-rmInterval = 111
-
+biased = True # bias is present
 computeRewardAtEnd = False # (immediate) reward is calculated after each action
-gamma = 0.995 # discount factor
-
 
 target_model_update = 1e-2 # 10000 # 1e-2 # 0.01  -> 0.01<1, so soft update of target model: target_model_params = target_model_update * local_model_params + (1 - target_model_update) * taget_model_params
-biased = True # bias is present
+# TODO: try target_model_update = 10,000 (hard update every 10000th step)
+
+nTrEpisodes = 50000 # 1000 # 50000 # 100000 # 20000 # 99000 # 10000 # 10000 # 49000 # 10000 # 20000
+indexSimulationRun = 1
+
+gamma = 0.995
+nb_eps_steps = 182
+nb_steps = nb_eps_steps*nTrEpisodes  # 10,000 episodes; TODO: vary, try 182x20000 -> 20000 episodes; number of steps/state transitions in each episode = bookingHorizon = 182
+logging_interval = nb_steps/10 # TODO: check convergence criteria/method/mechanism/strategy
+rmInterval = 111 # 333 # 11 # 111 # 333 # 555 # choose odd running mean interval # int(nb_steps/1000) # TODO: use replay buffer
+# testInterval = 50
 
 value_max=1
 value_min=.01
-
-policyStr = "LinearAnnealedPolicy(EpsGreedyQPolicy(), attr='eps', value_max=1., value_min=.01, value_test=.05, nb_steps=nb_steps)"  
+# policyStr = "LinearAnnealedPolicy(BoltzmannQPolicy(), attr='eps', value_max=1., value_min=.1, value_test=.05, nb_steps=nb_steps)"
+policyStr = "LinearAnnealedPolicy(EpsGreedyQPolicy(), attr='eps', value_max=1., value_min=.01, value_test=.05, nb_steps=nb_steps)"                              
 policy = LinearAnnealedPolicy(EpsGreedyQPolicy(), attr='eps', value_max=1., value_min=.01, value_test=.05, nb_steps=nb_steps) # nb_steps=nb_steps-nb_eps_steps*500
 # policy = EpsGreedyQPolicy(eps=.1)
 # policy = LinearAnnealedPolicy(BoltzmannQPolicy(), attr='tau', value_max=1., value_min=.1, value_test=.05, nb_steps=nb_steps)
@@ -56,14 +64,18 @@ arm_processor = armProcessor(biased)
 
 nActions = 3 # 6 # 18 # 6 # 18
 
-nHiddenNeuronsByLayer = [256, 256, 256, 64] # [256, 256] # [1024, 1024, 1024] # [16, 16, 16] # [512, 512, 512, 64] # [256, 256, 128, 64] # [512, 512, 512, 64] # [256, 256, 128, 64] 
-
+nHiddenNeuronsByLayer = [256, 256, 256, 64] # [256, 256] # [1024, 1024, 1024] # [16, 16, 16] # [512, 512, 512, 64] # [256, 256, 128, 64] # [512, 512, 512, 64] # [256, 256, 128, 64] # nHiddenNeuronsByLayer = [512] # nHiddenNeuronsByLayer = [512, 512]
+##nHiddenNeuronsLayer1 = 256
+##nHiddenNeuronsLayer2 = 256
+##nHiddenNeuronsLayer3 = 128
+##nHiddenNeuronsLayer4 = 64
 nHiddenNeurons = 256
 nHiddenLayers = 3
 
+##activationFunc = 'relu'
 
-# Building neural network model TODO: neural network hyperparameter optimization
-nStateVars = 4 # (t, b1, b2, b3)
+# Build model TODO: neural network hyperparameter optimization
+nStateVars = 6 # (t, b1, b2, b3, c1, c2)
 model = Sequential()
 if(biased):
     model.add(Flatten(input_shape=(1,nStateVars+1))) # 8 # 12 # input to NN: ([time, seats[0], seats[1], seats[2], bias=1]) array
@@ -83,6 +95,17 @@ model.add(Activation('linear'))
 
 memory = SequentialMemory(limit=50000, window_length=1)
 
+dqn = DQNAgent(processor=arm_processor, model=model, test_policy=test_policy, nb_actions=nActions,
+        memory=memory, policy=policy, target_model_update=target_model_update, gamma=gamma) # gamma = discount factor
+
+dqn.compile(Adam(lr=1e-3), metrics=['mae']) # lr=.00025
+
+######## Specify output directory and model number #################
+# loading weights of the model obtained by training the agent on deterministic market settings; these weights act as a good initial starting weight vector for training
+# or, loading weights of the best model for trainingData = training_c1_fd1_startTr5 when cancellationRate = [0, 0]
+# dqn.load_weights('output_OB2cnc1fd1_53' + '/dqn_armEnv_weights_model358.h5f')
+
+# bcfArray = [2.5]
 
 # logging experimental results
 performanceLogDir = "numericalExperimentsResults" # location where results.txt file (containing performance metrics values of each simulation run) is saved
@@ -90,13 +113,13 @@ if not os.path.isdir(performanceLogDir):
     os.mkdir(performanceLogDir)
 
 f = open(performanceLogDir+"/results.txt", "w")
-f.write("bumpingCostFactor, cancelProbsSetting, meanNarrivalsSetting, test_mean RP of best model, test_mean LF of best model" + "\n")
+f.write("wtpGroupMean, cancelProbsSetting, bumpingCostFactor" + "\n")
 
 
-# Running numerical experiments
+# Running numerical experiments for sensitivity analysis
 bcfArray = [2] # [2.0, 2.5]
-cncArray = [1,2,3] # [1] # [ 2 3]
-fdArray = [1,2,3] # [1 2 3] # fdArray = [3] # changed from fdArray = [1] 
+cncArray = [1] # [ 2 3]
+fdArray = [1] # [1 2 3] # fdArray = [3] # changed from fdArray = [1] 
 for bumpingCostFactor in bcfArray:
     for cancelProbsSetting in cncArray:
         for meanNarrivalsSetting in fdArray:
@@ -105,18 +128,6 @@ for bumpingCostFactor in bcfArray:
             outputDir = "numExp_outputs_" + "OB" + repr(bumpingCostFactor) + "cnc" + repr(cancelProbsSetting) + "_fcArrivals" + repr(meanNarrivalsSetting) + "_" + repr(indexSimulationRun) # location where output plots and model weights are saved # TODO: change last digit
             if not os.path.isdir(outputDir):
                 os.mkdir(outputDir)
-
-
-            # Creating DQN agent
-            dqn = DQNAgent(processor=arm_processor, model=model, test_policy=test_policy, nb_actions=nActions,
-                           memory=memory, policy=policy, target_model_update=target_model_update, gamma=gamma) # gamma = discount factor
-
-            dqn.compile(Adam(lr=1e-3), metrics=['mae']) # lr=.00025
-
-            ######## Specify output directory and model number #################
-            # loading weights of the model obtained by training the agent on deterministic market settings; these weights act as a good initial starting weight vector for training
-            # or, loading weights of the best model for trainingData = training_c1_fd1_startTr5 when cancellationRate = [0, 0]
-            # dqn.load_weights('output_OB2cnc1fd1_53' + '/dqn_armEnv_weights_model358.h5f')
                    
             trainingData = "trainingData_cnc" + repr(cancelProbsSetting) + "_fcArrivals" + repr(meanNarrivalsSetting) + ".mat"  # 'training_c1_fd1_startTr' # 'training_c1_fd1_testDP6' # 'training_c1_fd1_testDP5.mat'
 
@@ -125,9 +136,23 @@ for bumpingCostFactor in bcfArray:
             info_logger = infoLogger()
             test_logger = infoLogger()
 
+##            ModelIntervalCheckpoint_logger = ModelIntervalCheckpoint(filepath=outputDir + '/dqn_armEnv_weights_trEps{}.h5f', interval=182*500, verbose=0) # save model weights after every 500 episodes
+##            # dqn.test(env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True, nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1)
+##            
+##            start = time.time()
+##            print('Starting training')
+##            history = dqn.fit(env, callbacks=[info_logger, ModelIntervalCheckpoint_logger], verbose=0, nb_steps=nb_steps, log_interval=logging_interval) # do: try verbose=1, visualize = True; TODO: why env is not rendering?
+##            print('Completed training')
+##            # history = a keras.callbacks.History instance that recorded the entire training process.
+##            end = time.time()
+##            print('training time =',(end-start)/3600, 'hrs')
+##            
+##            dqn.save_weights(outputDir + '/dqn_armEnv_weights.h5f', overwrite=True)
+            
+
 
             # save weights and test model after every 500 episodes
-            nTestEpisodes = 300
+            nTestEpisodes = 100
             stepsCounter = 0
             tr_RP = [] # records RP of agent in all training episodes
             tr_LF = [] # records LF of agent in all training episodes
@@ -146,7 +171,11 @@ for bumpingCostFactor in bcfArray:
                 tr_RP.append(info_logger.rewardPercentage)
                 tr_LF.append(info_logger.loadFactor)
                 
-
+##                # Save neural network weights
+##                dqn.save_weights('dqn_{}_weights.h5f'.format(ENV_NAME), overwrite=True)
+##
+##                # Save memory
+##                pickle.dump(memory, open("memory.pkl", "wb"))
 
                 # Run test
                 dqn.test(env, callbacks = [test_logger], nb_episodes=nTestEpisodes, visualize=False)
@@ -163,60 +192,42 @@ for bumpingCostFactor in bcfArray:
                 print('current episode index =', iterInd*checkPointInterval)
                 print('epsilon value_max =', value_max)
 
-                print('cancelProbsSetting =', cancelProbsSetting)
-                print('meanNarrivalsSetting =', meanNarrivalsSetting)
-
                 dqn.save_weights(outputDir + '/dqn_armEnv_weights_model{}.h5f'.format(iterInd), overwrite=True)
                 # dqn.load_weights(outputDir + '/dqn_armEnv_weights_model{}.h5f'.format(iterInd))
                 # weights = dqn.model.get_weights()
-
-
-
-
 
             bestModelIndex = trModels_testPerf_meanRP.index(max(trModels_testPerf_meanRP))
             print('Best model = ' + repr(bestModelIndex+1))
             print('mean RP of best model = ' + repr(max(trModels_testPerf_meanRP)))
             print('mean LF of best model = ' + repr(trModels_testPerf_meanLF[bestModelIndex]))
             
-
-
-
-            nModels = len(trModels_testPerf_meanRP) # 300
-            rmInterval = 55 # 33 # 11
-
-            t1 = np.arange(nModels)+1
-            t2 = np.arange(1+(rmInterval-1)/2, nModels+1-(rmInterval-1)/2)
-            
-            # Making plots of rP of trModels at the checkpoints
-            plt.plot(t1, trModels_testPerf_meanRP, t2, running_mean(trModels_testPerf_meanRP, rmInterval))
+            # Making plots of rP of trModels at the checkpoints 
+            plt.plot(trModels_testPerf_meanRP)
             # plt.title('Learning Curve')
-            plt.ylabel('Optimal Revenue (%)')
+            plt.ylabel('Percentage of Optimal Reward')
             plt.xlabel('Model')
-            plt.savefig(outputDir + '/trPlot_modelsAtCheckpoints_optimalRP.png')
+            plt.savefig(outputDir + '/trainingPlot_optimalRewardPercentage.png')
             plt.close()
             # plt.show()
 
-            # Making plots of lf of trModels at the checkpoints
-            plt.plot(t1, trModels_testPerf_meanLF, t2, running_mean(trModels_testPerf_meanLF, rmInterval))
-            plt.ylabel('Load Factor (%)')
+            # Making plots of lf of trModels at the checkpoints 
+            plt.plot(trModels_testPerf_meanLF)
+            # plt.title('Learning Curve')
+            plt.ylabel('Percentage of Load Factor')
             plt.xlabel('Model')
-            plt.savefig(outputDir + '/trPlot_modelsAtCheckpoints_LF.png')
+            plt.savefig(outputDir + '/trainingPlot_loadFactorPercentage.png')
             plt.close()
-            # plt.show()            
+            # plt.show()
                 
-
-
-
-            
-            # loading best model, testing its performance, and saving its testLogger object
-            dqn.load_weights(outputDir + '/dqn_armEnv_weights_model{}.h5f'.format(bestModelIndex+1)) 
+            # saving the testLogger object created by the best model
+            # specify best model
+            dqn.load_weights(outputDir + '/dqn_armEnv_weights_model{}.h5f'.format(bestModelIndex+1)) # model358
                         
             testData = "testData_cnc" + repr(cancelProbsSetting) + "_fcArrivals" + repr(meanNarrivalsSetting) + ".mat"  
             env = armEnv(testData, biased, computeRewardAtEnd, bumpingCostFactor) # creating armEnv instance
 
             test_logger = infoLogger()
-            nTestEpisodes = 300 # 150
+            nTestEpisodes = 300
             rmInterval = int(nTestEpisodes/10)
                        
             dqn.test(env, callbacks = [test_logger], nb_episodes=nTestEpisodes, visualize=False)
@@ -233,7 +244,7 @@ for bumpingCostFactor in bcfArray:
             # print('average_ap = ' + repr(np.mean(aP)))
             print('avgLoadFactor of best model = ' + repr(np.mean(LF)))
 
-            # saving the test_logger object of the best model found in this numerical experiment
+            # saving the test_logger object of the best model for this numerical experiment
             with open(outputDir + '/testLogger_bestModel.pkl', 'wb') as pklFilePointer1:
                 pickle.dump([test_logger.nBookings, test_logger.nCancellations, test_logger.episode_reward,
                              test_logger.max_reward, test_logger.rewardPercentage, test_logger.overbooking,
@@ -243,24 +254,24 @@ for bumpingCostFactor in bcfArray:
             with open(outputDir + '/trRP_trLF_modelsTestRP_modelsTestLF.pkl', 'wb') as pklFilePointer2:
                 pickle.dump([tr_RP, tr_LF, trModels_testPerf_meanRP, trModels_testPerf_meanLF], pklFilePointer2)            
 
-
-
+##            # saving rP and LF arrays
+##            np.savez(outputDir + '/TrainingData.npz', rP=rP, LF=LF)
 
             # writing simulation/experiment details onto files problemParameters.txt and results.txt
-            f.write(repr(bumpingCostFactor) + ", ")
-            f.write(repr(cancelProbsSetting) + ", ")
             f.write(repr(meanNarrivalsSetting) + ", ")
-            f.write(repr(trModels_testPerf_meanRP[bestModelIndex]) + ", ")
-            f.write(repr(trModels_testPerf_meanLF[bestModelIndex]) + "\n")
+            f.write(repr(cancelProbsSetting) + ", ")
+            f.write(repr(bumpingCostFactor) + ", ")
             
-            g = open(outputDir+"/problemParameters.txt", "w")            
+            g = open(outputDir+"/problemParameters.txt", "w")
+
+            
             
             mat = scipy.io.loadmat(trainingData, squeeze_me=True)
             nFareClasses = mat['nFareClasses']
             fClassPrices = mat['fClassPrices']
             fClassMeanArrivals = mat['fClassMeanArrivals']
             arrivalProcess = 'NHPP'
-            cncProb_fClasses = mat['cncProb_fClasses']
+            fClassCancelRate = mat['fClassCancelRate']
             cancellationProcess = 'time-varying cancellation probabilities'
             
             g.write("fcArrivalsSetting:" + repr(meanNarrivalsSetting) + "\n")
@@ -272,8 +283,7 @@ for bumpingCostFactor in bcfArray:
             g.write("fClassMeanArrivals:" + repr(fClassMeanArrivals) + "\n")  
             g.write("arrivalProcess:" + repr(arrivalProcess) + "\n")
             g.write("cancellationProcess:" + repr(cancellationProcess) + "\n")            
-            g.write("cncProb_fClasses_last2timeSteps:" + repr(cncProb_fClasses[:,-2:]) + "\n")
-            g.write("cncProb_fClasses_remainingtimeSteps:" + repr(cncProb_fClasses[:,1]) + "\n")
+            g.write("fclassCancellationRates:" + repr(fClassCancelRate) + "\n")
             
             g.write("targetModelUpdate:" + repr(target_model_update) + "\n")
             g.write("nTrEpisodes:" + repr(nTrEpisodes) + "\n")
@@ -284,6 +294,8 @@ for bumpingCostFactor in bcfArray:
             g.write("nHiddenNeurons:" + repr(nHiddenNeurons) + "\n")
             g.write("nHiddenLayers:" + repr(nHiddenLayers) + "\n")
             
+            g.write("avgOptimalReward_Test:" + repr(np.mean(rP)) + "\n")
+            g.write("avgLoadFactor_Test:" + repr(np.mean(LF)) + "\n")
             
             g.write("trainingData filename:" + trainingData + "\n")
             g.write("testData filename:" + testData + "\n")
